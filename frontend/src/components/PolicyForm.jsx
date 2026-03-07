@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 
 const TYPE_BADGE = {
-  compensation: { className: 'bg-indigo-500/15 text-indigo-400', label: 'Compensation' },
-  board:        { className: 'bg-blue-500/15 text-blue-400',    label: 'Board' },
-  shareholder:  { className: 'bg-green-500/15 text-green-400',  label: 'Shareholder' },
-  auditor:      { className: 'bg-gray-500/15 text-gray-400',    label: 'Auditor' },
+  executive_pay: { className: 'bg-indigo-500/15 text-indigo-400', label: 'Exec Pay' },
+  compensation:  { className: 'bg-indigo-500/15 text-indigo-400', label: 'Compensation' },
+  board:         { className: 'bg-blue-500/15 text-blue-400',     label: 'Board' },
+  esg:           { className: 'bg-green-500/15 text-green-400',   label: 'ESG' },
+  climate:       { className: 'bg-green-500/15 text-green-400',   label: 'Climate' },
+  auditor:       { className: 'bg-gray-500/15 text-gray-400',     label: 'Auditor' },
+  merger:        { className: 'bg-red-500/15 text-red-400',       label: 'Merger' },
 }
 
 const PLACEHOLDER = `Vote against executive pay raises above 10%.
