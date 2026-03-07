@@ -45,7 +45,7 @@ def call_groq_json(prompt):
             }
         ],
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=4000,
     )
     raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
@@ -120,7 +120,7 @@ DO NOT use "other" if the proposal fits any of the above categories.
 Most proxy filings have: executive pay, board elections, and auditor ratification. Always classify those correctly.
 
 Filing text:
-{filing_text[:6000]}"""
+{filing_text[:15000]}"""
 
 
 @app.route("/api/fetch-proxy", methods=["POST"])
