@@ -46,8 +46,9 @@ def fetch_proxy_filing(ticker: str) -> str:
     if doc_response.status_code != 200:
         raise FilingNotFoundError(f"Failed to fetch document at {doc_url}")
 
-    # 8. Return the first 40,000 characters to save AI tokens
-    return doc_response.text[:40000]
+    # 8. Return more characters — HTML tags inflate size, stripping later
+    #    leaves ~20-30k of actual readable proposal text
+    return doc_response.text[:120000]
 
 
 # --- TEST BLOCK ---

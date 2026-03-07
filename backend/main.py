@@ -120,7 +120,7 @@ DO NOT use "other" if the proposal fits any of the above categories.
 Most proxy filings have: executive pay, board elections, and auditor ratification. Always classify those correctly.
 
 Filing text:
-{filing_text[:15000]}"""
+{filing_text}"""
 
 
 @app.route("/api/fetch-proxy", methods=["POST"])
@@ -132,7 +132,8 @@ def fetch_proxy():
 
     try:
         filing_text = fetch_proxy_filing(ticker)
-        filing_text = strip_html(filing_text)
+        filing_text = strip_html(filing_text)      # strip first
+        filing_text = filing_text[:25000]          # then slice clean text
         proposals = call_groq_json(make_proposal_prompt(filing_text))
         return jsonify({"proposals": proposals, "company": ticker, "source": "SEC EDGAR"})
 
@@ -168,6 +169,7 @@ def extract_proposals():
         return jsonify({"error": "No readable text found"}), 500
 
     filing_text = strip_html(filing_text)
+    filing_text = filing_text[:25000]
 
     try:
         proposals = call_groq_json(make_proposal_prompt(filing_text))
