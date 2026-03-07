@@ -1,134 +1,142 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAppState } from "../state.jsx";
-import UploadForm from "../components/UploadForm.jsx";
+import { useAppState } from "../state";
+import { fetchProxyByTicker, extractProposals, runVote } from "../api";
+import UploadForm from "../components/UploadForm";
 
 export default function Upload() {
-  const [isLoading, setIsLoading]     = useState(false);
-  const [loadingStep, setLoadingStep] = useState(1);
-  const [error, setError]             = useState(null);
   const { currentPolicy, setResults } = useAppState();
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(0);
+  const [error, setError] = useState(null);
+  const [overlay, setOverlay] = useState(false);
+  const [overlayExit, setOverlayExit] = useState(false);
+  const [overlayLabel, setOverlayLabel] = useState("");
   const navigate = useNavigate();
 
-  async function handleAnalyze(input) {
-    setIsLoading(true);
+  async function handleAnalyze(payload) {
+    if (!currentPolicy) return;
+
+    const label =
+      payload.type === "ticker" ? payload.ticker :
+      payload.type === "pdf"    ? payload.file.name :
+      "pasted text";
+
+    setOverlayLabel(label);
     setError(null);
+    setIsLoading(true);
     setLoadingStep(1);
 
-    const interval = setInterval(() => {
-      setLoadingStep(prev => (prev < 5 ? prev + 1 : prev));
-    }, 1200);
-
     try {
-      let proposals, company, source;
-
-      if (input.type === "ticker") {
-        // Step 1-2: Fetch from SEC EDGAR
-        const res = await fetch("/api/fetch-proxy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ticker: input.ticker }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        proposals = data.proposals;
-        company   = data.company;
-        source    = data.source;
-
-      } else if (input.type === "pdf") {
-        // PDF upload
-        const formData = new FormData();
-        formData.append("file", input.file);
-        const res = await fetch("/api/extract-proposals", {
-          method: "POST",
-          body: formData,
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        proposals = data.proposals;
-        company   = data.company;
-        source    = data.source;
-
+      // ── Step 1-2: Fetch / extract proposals ─────────────────
+      setLoadingStep(2);
+      let extracted;
+      if (payload.type === "ticker") {
+        extracted = await fetchProxyByTicker(payload.ticker);
       } else {
-        // Paste text — send as filing_text
-        const res = await fetch("/api/extract-proposals", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filing_text: input.text }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        proposals = data.proposals;
-        company   = data.company;
-        source    = data.source;
+        extracted = await extractProposals(payload);
       }
+      // extracted = { proposals: [...], company: "...", source: "..." }
 
+      // ── Step 3: Run rules engine + record to VetoChain ──────
+      setLoadingStep(3);
+      const voteData = await runVote(
+        extracted.proposals,
+        currentPolicy.rules,
+        extracted.company
+      );
+      // voteData = { decisions: [...], summary: {...} }
+
+      // ── Step 4-5: Store results ──────────────────────────────
       setLoadingStep(4);
 
-      // Step 4: Run rules engine
-      const voteRes = await fetch("/api/vote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          proposals,
-          rules: currentPolicy.rules,
-          company,
-        }),
-      });
-      const voteData = await voteRes.json();
-      if (voteData.error) throw new Error(voteData.error);
+      // Normalize into the shape ResultsTable expects
+      const results = {
+        company: extracted.company,
+        ticker: payload.type === "ticker" ? payload.ticker : extracted.company,
+        votes: voteData.decisions.map((d) => ({
+          proposal_id:    d.proposal,
+          proposal_label: d.proposal,
+          type:           d.type,
+          extracted_fact: d.description || "—",
+          rule_matched:   d.rule_triggered,
+          decision:       d.vote === "YES" ? "FOR" : d.vote === "NO" ? "AGAINST" : "FLAGGED",
+          confidence:     d.confidence === "HIGH" ? 1.0 : d.confidence === "MEDIUM" ? 0.6 : 0.3,
+          notes:          d.confidence === "REQUIRES_HUMAN_REVIEW"
+                            ? "This proposal could not be matched to a rule and requires manual review."
+                            : d.rule_triggered,
+        })),
+      };
 
       setLoadingStep(5);
+      setResults(results);
 
-      // Normalize for ResultsTable
-      const votes = voteData.decisions.map((d, i) => ({
-        proposal_id:    `p${i}`,
-        proposal_label: d.proposal,
-        type:           d.type,
-        extracted_fact: d.description || "",
-        rule_matched:   d.rule_triggered,
-        decision:       d.vote === "YES" ? "FOR" : d.vote === "NO" ? "AGAINST" : "FLAGGED",
-        confidence:     d.confidence === "HIGH" ? 0.95 : d.confidence === "MEDIUM" ? 0.65 : 0.3,
-        notes:          d.confidence === "REQUIRES_HUMAN_REVIEW" ? d.rule_triggered : "",
-      }));
+      await new Promise((r) => setTimeout(r, 400));
+      setIsLoading(false);
+      setOverlay(true);
 
-      setResults({
-        votes,
-        company,
-        ticker: input.ticker || company,
-        source,
-      });
-
-      clearInterval(interval);
-      navigate("/results");
+      setTimeout(() => {
+        setOverlayExit(true);
+        setTimeout(() => navigate("/results"), 300);
+      }, 800);
 
     } catch (err) {
-      clearInterval(interval);
-      setError(err.message);
-    } finally {
       setIsLoading(false);
-      setLoadingStep(1);
+      setLoadingStep(0);
+      setError(
+        err.message.includes("filing")
+          ? `No SEC filing found for that ticker.`
+          : `Analysis failed: ${err.message}`
+      );
     }
   }
 
-  if (!currentPolicy) {
-    return (
-      <div className="p-8">
-        <div className="bg-yellow-950 border border-yellow-500 rounded-lg px-4 py-3 text-yellow-400 mb-4 text-sm">
-          ⚠ You need to compile a policy first.
-        </div>
-        <a href="/policy" className="text-indigo-400 text-sm">→ Go to Policy Compiler</a>
-      </div>
-    );
-  }
-
   return (
-    <div className="p-8">
-      {error && (
-        <div className="bg-red-950 border border-red-500 rounded-lg px-4 py-3 mb-5 text-red-400 text-sm">
-          {error}
+    <div style={{ padding: "40px 48px", maxWidth: 900, position: "relative" }}>
+
+      {/* Completion overlay */}
+      {overlay && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 9999,
+          background: "rgba(4,7,18,0.97)",
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 18,
+          opacity: overlayExit ? 0 : 1,
+          transition: "opacity 280ms ease",
+        }}>
+          <div style={{ fontSize: 80, color: "#22c55e", lineHeight: 1 }}>✓</div>
+          <div style={{ color: "#f9fafb", fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>
+            Analysis Complete
+          </div>
+          <div style={{ color: "#6b7280", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, letterSpacing: "0.08em" }}>
+            {overlayLabel} · navigating to results…
+          </div>
         </div>
       )}
+
+      {/* No policy warning */}
+      {!currentPolicy && (
+        <div style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: 8, padding: "20px 24px", display: "flex", alignItems: "flex-start", gap: 14, maxWidth: 560, marginBottom: 24 }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>⚠</span>
+          <div>
+            <div style={{ color: "#fbbf24", fontWeight: 600, fontSize: 14, marginBottom: 6 }}>No policy compiled yet.</div>
+            <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 16, lineHeight: 1.6 }}>Compile a policy before analyzing a ballot.</div>
+            <button
+              onClick={() => navigate("/policy")}
+              style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 4, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            >
+              Go to Policy Compiler →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "14px 18px", marginBottom: 24, color: "#fca5a5", fontSize: 13 }}>
+          ⚠ {error}
+        </div>
+      )}
+
       <UploadForm
         onAnalyze={handleAnalyze}
         isLoading={isLoading}

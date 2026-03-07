@@ -1,59 +1,69 @@
-import { useState, useEffect } from "react";
-import { useAppState } from "../state.jsx";
-import AuditLog from "../components/AuditLog.jsx";
+import { useEffect, useState } from "react";
+import { useAppState } from "../state";
+import { getAuditLog, verifyChain } from "../api";
+import AuditLog from "../components/AuditLog";
+
+// Backend (vetochain.py) returns: { index, timestamp (unix), previous_hash, hash, data }
+// data contains: { company, proposal, vote, rule_triggered, confidence }
+// AuditLog.jsx expects: { block_number, timestamp (ISO), previous_hash, hash, data }
+// data must contain: { ticker, decision (FOR/AGAINST/FLAGGED), rule_matched }
+function normalizeBlock(b) {
+  const isGenesis = b.index === 0;
+  return {
+    block_number:  b.index,
+    timestamp:     new Date(b.timestamp * 1000).toISOString(),
+    previous_hash: b.previous_hash,
+    hash:          b.hash,
+    data: isGenesis ? b.data : {
+      ticker:       b.data.company       ?? b.data.ticker       ?? "—",
+      decision:     b.data.vote === "YES"    ? "FOR"
+                  : b.data.vote === "NO"     ? "AGAINST"
+                  : b.data.vote === "REVIEW" ? "FLAGGED"
+                  :                            (b.data.decision ?? "—"),
+      rule_matched: b.data.rule_triggered ?? b.data.rule_matched ?? null,
+      proposal:     b.data.proposal      ?? null,
+    },
+  };
+}
 
 export default function Audit() {
-  const { auditBlocks, setAuditBlocks } = useAppState();
-  const [verifyResult, setVerifyResult] = useState(null);
-  const [isVerifying, setIsVerifying]   = useState(false);
-  const [error, setError]               = useState(null);
+  const { auditBlocks, setAuditBlocks, verifyResult, setVerifyResult } = useAppState();
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function loadBlocks() {
+    try {
+      const data = await getAuditLog();
+      setAuditBlocks((data.blocks ?? []).map(normalizeBlock));
+    } catch (err) {
+      console.error("Failed to load audit log:", err);
+    }
+  }
 
   useEffect(() => {
-    async function fetchLog() {
-      try {
-        const res  = await fetch("/api/audit-log");
-        const data = await res.json();
-        // Normalize block fields for AuditLog component
-        const blocks = (data.blocks || []).map((b) => ({
-          block_number:  b.index ?? b.block_number ?? 0,
-          timestamp:     b.timestamp ? new Date(b.timestamp * 1000).toISOString() : new Date().toISOString(),
-          hash:          b.hash || "",
-          previous_hash: b.previous_hash || "",
-          data: {
-            ticker:       b.data?.company || b.data?.ticker || "",
-            decision:     b.data?.vote === "YES" ? "FOR" : b.data?.vote === "NO" ? "AGAINST" : b.data?.vote === "REVIEW" ? "FLAGGED" : null,
-            rule_matched: b.data?.rule_triggered || "",
-          },
-        }));
-        setAuditBlocks(blocks);
-      } catch (err) {
-        setError("Could not load audit log — backend may be offline.");
-      }
-    }
-
-    fetchLog();
-    const interval = setInterval(fetchLog, 10000);
-    return () => clearInterval(interval);
+    loadBlocks();
+    const timer = setInterval(loadBlocks, 10000);
+    return () => clearInterval(timer);
   }, []);
 
   async function handleVerify() {
     setIsVerifying(true);
+    setError(null);
     try {
-      const res  = await fetch("/api/verify-chain");
-      const data = await res.json();
-      setVerifyResult(data);
+      const result = await verifyChain();
+      setVerifyResult(result);
     } catch (err) {
-      setError("Verification failed — backend may be offline.");
+      setError(err.message);
     } finally {
       setIsVerifying(false);
     }
   }
 
   return (
-    <div className="p-8">
+    <div style={{ padding: "40px 48px" }}>
       {error && (
-        <div className="bg-red-950 border border-red-500 rounded-lg px-4 py-3 mb-5 text-red-400 text-sm">
-          {error}
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "14px 18px", marginBottom: 24, color: "#fca5a5", fontSize: 13 }}>
+          ⚠ {error}
         </div>
       )}
       <AuditLog
