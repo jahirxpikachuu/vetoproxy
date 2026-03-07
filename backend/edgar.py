@@ -12,9 +12,7 @@ def fetch_proxy_filing(ticker: str) -> str:
     }
 
     # 1. Build URL for the SEC EFTS Search API
-    search_url = f"https://efts.sec.gov/LATEST/search-index?q=%22DEF+14A%22&entity={ticker}&dateRange=custom&startdt=2023-01-01&enddt=2025-01-01"
-
-    # 2. GET the search results
+    search_url = f"https://efts.sec.gov/LATEST/search-index?q=%22DEF+14A%22&entity={ticker}&dateRange=custom&startdt=2020-01-01&enddt=2026-12-31"    # 2. GET the search results
     response = requests.get(search_url, headers=headers)
     if response.status_code != 200:
         raise FilingNotFoundError(f"SEC Search API failed with status {response.status_code}")
