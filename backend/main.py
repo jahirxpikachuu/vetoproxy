@@ -72,15 +72,21 @@ def compile_policy():
     if not raw_rules:
         return jsonify({"error": "No rules provided"}), 400
 
-    prompt = f"""Convert the following plain English voting rules into a JSON array.
-Return ONLY a JSON array, no explanation, no markdown.
+    prompt = f"""Convert these voting rules into a JSON array.
+Return ONLY a JSON array. No explanation. No markdown.
 
-Each object must have exactly these fields:
-- "original"  : the original plain English rule (string)
-- "type"      : one of: executive_pay, board, esg, climate, merger, auditor, other
-- "condition" : short description of when this rule applies (string)
-- "action"    : exactly "yes" or "no" (string)
-- "threshold" : a number if the rule involves a percentage or numeric limit, otherwise null
+Each object must have exactly:
+- "original": the original rule text
+- "type": one of EXACTLY: executive_pay, board, esg, climate, merger, auditor, other
+- "condition": when this rule applies
+- "action": exactly "yes" or "no"
+- "threshold": number if rule has a percentage/numeric limit, else null
+
+IMPORTANT:
+Use "executive_pay" for any compensation or pay related rule.
+Use "board" for any director election rule.
+Use "climate" or "esg" for environmental/sustainability rules.
+Use "auditor" for any auditor ratification rule.
 
 Rules:
 {raw_rules}"""
@@ -92,6 +98,31 @@ Rules:
         return jsonify({"error": str(e)}), 500
 
 
+def make_proposal_prompt(filing_text):
+    return f"""Extract ALL voting proposals from this SEC DEF 14A proxy filing.
+Return ONLY a JSON array. No explanation. No markdown.
+
+Each object must have EXACTLY:
+- "title": short name of the proposal
+- "type": you MUST use one of these exact values:
+  * "executive_pay" — for ANY compensation, salary, bonus, pay, incentive proposal
+  * "board_election" — for ANY director election or re-election
+  * "climate" — for climate, environment, emissions proposals
+  * "esg" — for ESG, sustainability, diversity proposals
+  * "merger" — for mergers, acquisitions, buyouts
+  * "auditor" — for auditor ratification or selection
+  * "other" — only if none of the above apply
+- "description": one sentence summary
+- "value": percentage increase as a NUMBER if executive pay (e.g. 12.5), else null
+- "independent": true/false if board election, else null
+
+DO NOT use "other" if the proposal fits any of the above categories.
+Most proxy filings have: executive pay, board elections, and auditor ratification. Always classify those correctly.
+
+Filing text:
+{filing_text[:6000]}"""
+
+
 @app.route("/api/fetch-proxy", methods=["POST"])
 def fetch_proxy():
     data = request.get_json()
@@ -101,24 +132,8 @@ def fetch_proxy():
 
     try:
         filing_text = fetch_proxy_filing(ticker)
-
-        # Strip HTML so Groq can read plain text
         filing_text = strip_html(filing_text)
-
-        prompt = f"""Extract ALL voting proposals from this SEC DEF 14A proxy filing.
-Return ONLY a JSON array, no explanation, no markdown.
-
-Each object must have EXACTLY these fields:
-- "title"      : short name of the proposal (string)
-- "type"       : one of: executive_pay, board_election, esg, climate, merger, auditor, other
-- "description": one sentence summary (string)
-- "value"      : if executive pay, the percentage increase as a number. Otherwise null.
-- "independent": if board election, true if independent, false if not. Otherwise null.
-
-Proxy filing text:
-{filing_text[:6000]}"""
-
-        proposals = call_groq_json(prompt)
+        proposals = call_groq_json(make_proposal_prompt(filing_text))
         return jsonify({"proposals": proposals, "company": ticker, "source": "SEC EDGAR"})
 
     except FilingNotFoundError:
@@ -152,24 +167,10 @@ def extract_proposals():
     if not filing_text.strip():
         return jsonify({"error": "No readable text found"}), 500
 
-    # Strip HTML if present
     filing_text = strip_html(filing_text)
 
-    prompt = f"""Extract ALL voting proposals from this SEC DEF 14A proxy filing.
-Return ONLY a JSON array, no explanation, no markdown.
-
-Each object must have EXACTLY these fields:
-- "title"      : short name of the proposal (string)
-- "type"       : one of: executive_pay, board_election, esg, climate, merger, auditor, other
-- "description": one sentence summary (string)
-- "value"      : if executive pay, the percentage increase as a number. Otherwise null.
-- "independent": if board election, true if independent, false if not. Otherwise null.
-
-Proxy filing text:
-{filing_text[:6000]}"""
-
     try:
-        proposals = call_groq_json(prompt)
+        proposals = call_groq_json(make_proposal_prompt(filing_text))
         return jsonify({"proposals": proposals, "company": company, "source": source})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -181,7 +182,6 @@ def vote():
     proposals = data.get("proposals", [])
     rules = data.get("rules", [])
     company = data.get("company", "Unknown Company")
-
 
     if not proposals:
         return jsonify({"error": "No proposals provided"}), 400

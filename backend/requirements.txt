@@ -1,6 +1,6 @@
 flask
 flask-cors
-anthropic
+groq
 PyPDF2
 python-dotenv
 requests

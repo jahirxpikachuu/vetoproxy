@@ -14,9 +14,21 @@ export default function Policy() {
     setError(null);
     try {
       const data = await compilePolicy(rawText);
+      // Backend returns compiled_rules with shape: { original, type, condition, action, threshold }
+      // PolicyForm renders: rule_id, description, condition, type — so we normalize for display
+      const displayRules = (data.compiled_rules || []).map((r, i) => ({
+        rule_id:     `r${i + 1}`,
+        description: r.original || r.condition,
+        condition:   r.threshold != null
+                       ? `${r.condition} (threshold: ${r.threshold})`
+                       : r.condition,
+        type:        r.type,
+      }));
+
       setPolicy({
-        rules: data.compiled_rules,
-        raw_input: data.raw_input,
+        rules:        data.compiled_rules,  // raw — sent as-is to /api/vote
+        displayRules,                        // normalized — rendered by PolicyForm
+        raw_input:    data.raw_input,
       });
     } catch (err) {
       setError(err.message);
@@ -35,7 +47,7 @@ export default function Policy() {
 
       <PolicyForm
         onCompile={handleCompile}
-        compiledRules={currentPolicy?.rules ?? null}
+        compiledRules={currentPolicy?.displayRules ?? null}
         isLoading={isLoading}
       />
     </div>

@@ -40,11 +40,13 @@ def _evaluate(proposal, rules):
                 matched_rule = r_original
                 confidence   = "HIGH"
                 break
-            # threshold missing but types match — flag for review
-            vote         = "REVIEW"
-            matched_rule = "Compensation rule found but no threshold defined"
-            confidence   = "REQUIRES_HUMAN_REVIEW"
-            break
+            elif r_threshold is None:
+                # No threshold defined — apply action unconditionally
+                vote         = "YES" if r_action in ("yes", "support", "for") else "NO"
+                matched_rule = r_original
+                confidence   = "MEDIUM"
+                break
+            # p_value missing but threshold exists — fall through to keyword check
 
         # ── Board / director elections ──────────────────────
         if r_type in ("board", "director") and \
@@ -90,7 +92,23 @@ def _evaluate(proposal, rules):
             vote         = "YES" if r_action in ("yes", "support", "for") else "NO"
             matched_rule = r_original
             confidence   = "MEDIUM"
-            # Don't break — keep looking for a better match
+            break  # Don't keep looking — keyword match is good enough
+
+        # ── Catch-all: rule type is "other" or unrecognised ─
+        # If we reach here, no type-specific branch matched this rule.
+        # Apply it universally so broad rules like "vote against everything"
+        # are honoured rather than silently dropped.
+        if r_type in ("other", "general") or not any([
+            r_type in ("executive_pay", "compensation"),
+            r_type in ("board", "director"),
+            r_type in ("esg", "climate", "environment"),
+            r_type in ("merger", "acquisition", "m&a"),
+            r_type in ("auditor",),
+        ]):
+            vote         = "YES" if r_action in ("yes", "support", "for") else "NO"
+            matched_rule = r_original
+            confidence   = "MEDIUM"
+            break
 
     # ── No rule matched → human review ─────────────────────
     if vote is None:
