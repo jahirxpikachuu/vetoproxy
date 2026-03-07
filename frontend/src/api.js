@@ -1,4 +1,4 @@
-const BASE_URL = "";  // empty = use Vite proxy (proxies /api → localhost:5001)
+const BASE_URL = import.meta.env.VITE_API_URL || "";
 
 const handleResponse = async (res) => {
   if (!res.ok) {
