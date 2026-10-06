@@ -125,6 +125,6 @@ VITE_API_URL=https://your-railway-url.up.railway.app
 Built at **BME HackNight 2026** by **el quattro**
 
 - Rehman Elahi
-- Ahmed Mugeeb
+- Ahmed Mugeeb Yahya 
 - Ahmed Jahir
 - Tinoda Sam Dangwa
